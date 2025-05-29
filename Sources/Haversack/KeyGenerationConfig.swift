@@ -7,12 +7,13 @@ import Foundation
 ///
 /// Create a `KeyGenerationConfig` and then pass it to ``Haversack/Haversack/generateKey(fromConfig:itemSecurity:)-1r4ki``
 /// or one of it's asynchronous variants.
-public struct KeyGenerationConfig {
+public struct KeyGenerationConfig: Sendable {
     /// The keychain config query.
     ///
-    /// You cannot manipulate this directly.  Instead use the fluent methods such as ``labeled(_:)``,
+    /// Use the fluent methods such as ``labeled(_:)``,
     /// ``tagged(_:)``, and others in order to build up the key generation configuration.
-    public private(set) var query = SecurityFrameworkQuery()
+    /// `nonisolated(unsafe)` because `SecurityFrameworkQuery` is not `Sendable`
+    nonisolated(unsafe) public let query: SecurityFrameworkQuery
 
     /// Initializer for a key _not_ in the Secure Enclave.
     ///
@@ -22,16 +23,7 @@ public struct KeyGenerationConfig {
     ///   - algorithm: The key algorithm that you want to use
     ///   - keySize: How large should the key be (in bits).
     public init(algorithm: KeyAlgorithm, keySize: Int) {
-        query[kSecAttrKeyType as String] = algorithm.securityFrameworkKey
-        query[kSecAttrKeySizeInBits as String] = keySize
-
-        let privateKeyInfo: SecurityFrameworkQuery = [kSecAttrIsPermanent as String: true]
-        query[kSecPrivateKeyAttrs as String] = privateKeyInfo
-
-        let publicKeyInfo: SecurityFrameworkQuery = [kSecAttrIsPermanent as String: false]
-        query[kSecPublicKeyAttrs as String] = publicKeyInfo
-
-        query[kSecAttrIsExtractable as String] = false
+        self.query = Self.basicInfo(algorithm: algorithm, keySize: keySize)
     }
 
     /// Initializer for a key in the Secure Enclave.
@@ -44,14 +36,38 @@ public struct KeyGenerationConfig {
             throw HaversackError.notPossible("Secure Enclave keys cannot be marked as synchronizable to iCloud Keychain and backups")
         }
 
-        self.init(algorithm: .ellipticCurvePrimeRandom, keySize: 256)
+        var configInfo = Self.basicInfo(algorithm: .ellipticCurvePrimeRandom, keySize: 256)
 
-        var privateKeyInfo = query[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
+        var privateKeyInfo = configInfo[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         let retrievability = KeychainItemRetrievability.complex(secureEnclaveRetrievableWhen, flags.union(.privateKeyUsage))
         privateKeyInfo[retrievability.securityFrameworkKey] = try retrievability.securityFrameworkValue()
-        query[kSecPrivateKeyAttrs as String] = privateKeyInfo
+        configInfo[kSecPrivateKeyAttrs as String] = privateKeyInfo
 
-        query[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave
+        configInfo[kSecAttrTokenID as String] = kSecAttrTokenIDSecureEnclave
+
+        self.query = configInfo
+    }
+    
+    /// Shared query information for both SecureEnclave and non-SecureEnclave keys.
+    private static func basicInfo(algorithm: KeyAlgorithm, keySize: Int) -> SecurityFrameworkQuery {
+        var configInfo = SecurityFrameworkQuery()
+        configInfo[kSecAttrKeyType as String] = algorithm.securityFrameworkKey
+        configInfo[kSecAttrKeySizeInBits as String] = keySize
+
+        let privateKeyInfo: SecurityFrameworkQuery = [kSecAttrIsPermanent as String: true]
+        configInfo[kSecPrivateKeyAttrs as String] = privateKeyInfo
+
+        let publicKeyInfo: SecurityFrameworkQuery = [kSecAttrIsPermanent as String: false]
+        configInfo[kSecPublicKeyAttrs as String] = publicKeyInfo
+
+        configInfo[kSecAttrIsExtractable as String] = false
+
+        return configInfo
+    }
+
+    /// Helper initalizer for the fluent methods that return a new instance with a new query.
+    private init(query: SecurityFrameworkQuery) {
+        self.query = query
     }
 
     // MARK: - Top level info
@@ -67,9 +83,9 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        copy.query[kSecAttrLabel as String] = label
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrLabel as String] = label
+        return Self(query: newQuery)
     }
 
     /// Add a tag to the top level key description.
@@ -84,9 +100,9 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        copy.query[kSecAttrApplicationTag as String] = tag
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrApplicationTag as String] = tag
+        return Self(query: newQuery)
     }
 
     /// Allow the keys to be extracted from the keychain; default is `false`.
@@ -100,9 +116,9 @@ public struct KeyGenerationConfig {
             throw HaversackError.notPossible("Secure Enclave keys cannot be marked as extractable")
         }
 
-        var copy = self
-        copy.query[kSecAttrIsExtractable as String] = extractable
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrIsExtractable as String] = extractable
+        return Self(query: newQuery)
     }
 
     // MARK: - Private key info
@@ -118,9 +134,9 @@ public struct KeyGenerationConfig {
         KeyUsagePolicy.defaultPrivateKey.subtracting(usage).securityFrameworkKeyArray.forEach { (dictionaryKey) in
             privateKeyInfo[dictionaryKey as String] = false
         }
-        var copy = self
-        copy.query[kSecPrivateKeyAttrs as String] = privateKeyInfo
-        return copy
+        var newQuery = self.query
+        newQuery[kSecPrivateKeyAttrs as String] = privateKeyInfo
+        return Self(query: newQuery)
     }
 
     /// Add a label to the private key description.
@@ -133,11 +149,11 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        var privateKeyInfo = copy.query[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
+        var newQuery = self.query
+        var privateKeyInfo = newQuery[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         privateKeyInfo[kSecAttrLabel as String] = label
-        copy.query[kSecPrivateKeyAttrs as String] = privateKeyInfo
-        return copy
+        newQuery[kSecPrivateKeyAttrs as String] = privateKeyInfo
+        return Self(query: newQuery)
 
     }
 
@@ -153,11 +169,11 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        var privateKeyInfo = copy.query[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
+        var newQuery = self.query
+        var privateKeyInfo = newQuery[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         privateKeyInfo[kSecAttrApplicationTag as String] = tag
-        copy.query[kSecPrivateKeyAttrs as String] = privateKeyInfo
-        return copy
+        newQuery[kSecPrivateKeyAttrs as String] = privateKeyInfo
+        return Self(query: newQuery)
     }
 
     /// Whether the private key should be stored in the keychain; default is `true`.
@@ -174,9 +190,9 @@ public struct KeyGenerationConfig {
         var privateKeyInfo = query[kSecPrivateKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         privateKeyInfo[kSecAttrIsPermanent as String] = shouldBePermanent
 
-        var copy = self
-        copy.query[kSecPrivateKeyAttrs as String] = privateKeyInfo
-        return copy
+        var newQuery = self.query
+        newQuery[kSecPrivateKeyAttrs as String] = privateKeyInfo
+        return Self(query: newQuery)
     }
 
     // MARK: - Public key info
@@ -192,9 +208,9 @@ public struct KeyGenerationConfig {
         KeyUsagePolicy.defaultPublicKey.subtracting(usage).securityFrameworkKeyArray.forEach { (dictionaryKey) in
             publicKeyInfo[dictionaryKey as String] = false
         }
-        var copy = self
-        copy.query[kSecPublicKeyAttrs as String] = publicKeyInfo
-        return copy
+        var newQuery = self.query
+        newQuery[kSecPublicKeyAttrs as String] = publicKeyInfo
+        return Self(query: newQuery)
     }
 
     /// Add a label to the public key description.
@@ -207,11 +223,11 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        var publicKeyInfo = copy.query[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
+        var newQuery = self.query
+        var publicKeyInfo = newQuery[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         publicKeyInfo[kSecAttrLabel as String] = label
-        copy.query[kSecPublicKeyAttrs as String] = publicKeyInfo
-        return copy
+        newQuery[kSecPublicKeyAttrs as String] = publicKeyInfo
+        return Self(query: newQuery)
 
     }
 
@@ -227,11 +243,11 @@ public struct KeyGenerationConfig {
             return self
         }
 
-        var copy = self
-        var publicKeyInfo = copy.query[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
+        var newQuery = self.query
+        var publicKeyInfo = newQuery[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         publicKeyInfo[kSecAttrApplicationTag as String] = tag
-        copy.query[kSecPublicKeyAttrs as String] = publicKeyInfo
-        return copy
+        newQuery[kSecPublicKeyAttrs as String] = publicKeyInfo
+        return Self(query: newQuery)
     }
 
     /// Whether the public key should be stored in the keychain; default is `false`.
@@ -245,9 +261,9 @@ public struct KeyGenerationConfig {
         var publicKeyInfo = query[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         publicKeyInfo[kSecAttrIsPermanent as String] = shouldBePermanent
 
-        var copy = self
-        copy.query[kSecPublicKeyAttrs as String] = publicKeyInfo
-        return copy
+        var newQuery = self.query
+        newQuery[kSecPublicKeyAttrs as String] = publicKeyInfo
+        return Self(query: newQuery)
     }
 
     /// Allow the public key to be extracted from the keychain; default is `false`.
@@ -264,8 +280,8 @@ public struct KeyGenerationConfig {
         var publicKeyInfo = query[kSecPublicKeyAttrs as String] as? SecurityFrameworkQuery ?? SecurityFrameworkQuery()
         publicKeyInfo[kSecAttrIsExtractable as String] = extractable
 
-        var copy = self
-        copy.query[kSecPublicKeyAttrs as String] = publicKeyInfo
-        return copy
+        var newQuery = self.query
+        newQuery[kSecPublicKeyAttrs as String] = publicKeyInfo
+        return Self(query: newQuery)
     }
 }

@@ -6,7 +6,7 @@ import Foundation
 /// Represents a connection to a keychain.
 ///
 /// Contains keychain search functionality and the ability to add/update/delete items in the keychain.
-public struct Haversack {
+public struct Haversack: Sendable {
     /// The configuration that the Haversack was created with.
     public let configuration: HaversackConfiguration
 
@@ -23,6 +23,7 @@ public struct Haversack {
     ///     - query: The fluent keychain query.
     /// - Throws: A ``HaversackError`` if the query returns no items or any errors occur.
     /// - Returns: Something conforming to the ``KeychainStorable`` protocol, based on the query type.
+    @available(*, deprecated, message: "Synchronous access to keychain items is deprecated.  Use the `first(where:) async` or `first(where:completionQueue:completion:)` method instead.")
     public func first<T: KeychainQuerying>(where query: T) throws -> T.Entity {
         return try configuration.serialQueue.sync {
             let localQuery = try makeSearchQuery(query, singleItem: true)
@@ -40,12 +41,10 @@ public struct Haversack {
     ///   - result: The item or an error will be given to the completion handler.
     public func first<T: KeychainQuerying>(where query: T, completionQueue: OperationQueue? = nil,
                                            completion: @escaping (_ result: Result<T.Entity, Error>) -> Void) {
-        configuration.serialQueue.async {
+        Task {
             let result: Result<T.Entity, Error>
             do {
-                let localQuery = try makeSearchQuery(query, singleItem: true)
-
-                let entity = try self.configuration.strategy.searchForOne(localQuery)
+                let entity = try await self.first(where: query)
                 result = .success(entity)
             } catch {
                 result = .failure(error)
@@ -102,6 +101,7 @@ public struct Haversack {
     ///     Otherwise an ``HaversackError/keychainError(_:)`` with `errSecDuplicateItem` is thrown.
     /// - Throws: A ``HaversackError`` if the query returns no items or any errors occur.
     /// - Returns: The original `item`.
+    @available(*, deprecated, message: "Use one of the asynchronous methods instead")
     @discardableResult
     public func save<T: KeychainStorable>(_ item: T, itemSecurity: ItemSecurity, updateExisting: Bool) throws -> T {
         try configuration.serialQueue.sync {
@@ -278,6 +278,7 @@ public struct Haversack {
     ///   - itemSecurity: What kind of security to place on the key; note that for Secure Enclave keys, the `config` contains all of the needed information.
     /// - Throws: A ``HaversackError`` if any errors occur.
     /// - Returns: A new `SecKey`
+    @available(*, deprecated, message: "Synchronous access to keychain items is deprecated.  Use the `generateKey(fromConfig:itemSecurity:) async` or `generateKey(fromConfig:itemSecurity::completionQueue:completion:)` method instead.")
     public func generateKey(fromConfig config: KeyGenerationConfig, itemSecurity: ItemSecurity) throws -> SecKey {
         return try configuration.serialQueue.sync {
             return try unsynchronizedKeyGeneration(fromConfig: config, itemSecurity: itemSecurity)
@@ -297,11 +298,11 @@ public struct Haversack {
     public func generateKey(fromConfig config: KeyGenerationConfig, itemSecurity: ItemSecurity,
                             completionQueue: OperationQueue? = nil,
                             completion: @escaping (_ result: Result<SecKey, Error>) -> Void) {
-        configuration.serialQueue.async {
+        Task {
             let result: Result<SecKey, Error>
 
             do {
-                let key = try unsynchronizedKeyGeneration(fromConfig: config, itemSecurity: itemSecurity)
+                let key = try await generateKey(fromConfig: config, itemSecurity: itemSecurity)
                 result = .success(key)
             } catch {
                 result = .failure(error)

@@ -5,6 +5,199 @@ import Foundation
 import os.log
 import Security
 
+public protocol KeychainImplementation: Actor {
+    func searchForOne<T>(_ querying: T) throws -> T.Entity where T: KeychainQuerying
+    func search<T: KeychainQuerying>(_ querying: T) throws -> [T.Entity]
+    func save(_ item: SecurityFrameworkQuery) throws
+    func delete(_ item: SecurityFrameworkQuery, treatNotFoundAsSuccess: Bool) throws
+    func generateKey(_ query: SecurityFrameworkQuery) throws -> SecKey
+#if os(macOS)
+    func exportItems(_ items: [any KeychainExportable], configuration: KeychainExportConfig) throws -> Data
+    func importItems<T: KeychainImportable>(_ items: Data,
+                                            configuration: KeychainImportConfig<T>,
+                                            importKeychain: SecKeychain?) throws -> [T]
+#endif
+}
+
+public actor OperatingSystemKeychain: KeychainImplementation {
+    public func searchForOne<T>(_ querying: T) throws -> T.Entity where T : KeychainQuerying {
+        let query = querying.query
+        var result: CFTypeRef?
+
+        if let itemClass = query[kSecClass as String] as? String {
+            os_log("Searching for an item of class %{public}@", log: Logs.search, type: .info, itemClass)
+        }
+
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess && result != nil {
+            // What did the query ask for?
+            let contents = QueryContents(query: query)
+
+            if let entity = querying.processSingleItem(item: result, hasRef: contents.hasRef, hasData: contents.hasData,
+                                                       hasPersistentRef: contents.hasPersistentRef, hasAttrs: contents.hasAttrs) {
+                return entity
+            }
+
+            os_log("Problem converting item to entity %{public}@", log: Logs.search,
+                type: .error, String(describing: T.Entity.self))
+            os_log("Problem query was %{private}@", log: Logs.search, type: .debug, String(describing: query))
+            throw HaversackError.couldNotConvertToEntity
+        }
+
+        os_log("SecItemCopyMatching returned error %{public}d and item was %s", log: Logs.search,
+               type: .error, status, (result == nil ? "nil" : "non-nil"))
+        os_log("SecItemCopyMatching query was %{private}@", log: Logs.search,
+               type: .debug, String(describing: query))
+        throw HaversackError.keychainError(status)    }
+
+    public func search<T>(_ querying: T) throws -> [T.Entity] where T : KeychainQuerying {
+        let query = querying.query
+        var result: CFTypeRef?
+
+        if let itemClass = query[kSecClass as String] as? String {
+            os_log("Searching for items of class %{public}@", log: Logs.search, type: .info, itemClass)
+        }
+
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        if status == errSecSuccess {
+            // What did the query ask for?
+            let contents = QueryContents(query: query)
+
+            if CFArrayGetTypeID() == CFGetTypeID(result) {
+                if contents.shouldBeDictionary, let array = (result as? NSArray) as? [NSDictionary] {
+                    return array.compactMap {
+                        if let entity = querying.processSingleItem(item: $0, hasRef: contents.hasRef, hasData: contents.hasData,
+                                                                   hasPersistentRef: contents.hasPersistentRef,
+                                                                   hasAttrs: contents.hasAttrs) {
+                            return entity
+                        }
+
+                        return nil
+                    }
+                } else if contents.hasRef, let array = (result as? NSArray) as? [T.Entity.SecurityFrameworkType] {
+                    return array.compactMap {
+                        return T.Entity(from: $0, data: nil, attributes: nil, persistentRef: nil)
+                    }
+                } else if contents.hasData, let array = (result as? NSArray) as? [Data] {
+                    return array.compactMap {
+                        return T.Entity(from: nil, data: $0, attributes: nil, persistentRef: nil)
+                    }
+                } else if contents.hasPersistentRef, let array = (result as? NSArray) as? [Data] {
+                    return array.compactMap {
+                        return T.Entity(from: nil, data: nil, attributes: nil, persistentRef: $0)
+                    }
+                }
+                // NOTE: missing the hasAttrs case because that is treated in the `expectDict` case above.
+
+                // Could not convert the returned items to an entity array.
+                os_log("Problem converting item to entity %{public}@", log: Logs.search,
+                    type: .error, String(describing: T.Entity.self))
+                os_log("Problem query was %{private}@", log: Logs.search, type: .debug, String(describing: query))
+                throw HaversackError.couldNotConvertToEntity
+            } else {
+                if let entity = querying.processSingleItem(item: result, hasRef: contents.hasRef, hasData: contents.hasData,
+                                                           hasPersistentRef: contents.hasPersistentRef,
+                                                           hasAttrs: contents.hasAttrs) {
+                    return [entity]
+                }
+
+                // Could not convert the single returned item to an entity.
+                os_log("Problem converting item to entity %{public}@", log: Logs.search,
+                    type: .error, String(describing: T.Entity.self))
+                os_log("Problem query was %{private}@", log: Logs.search, type: .debug, String(describing: query))
+                throw HaversackError.couldNotConvertToEntity
+            }
+        }
+
+        os_log("SecItemCopyMatching returned error %{public}d", log: Logs.search, type: .error, status)
+        os_log("SecItemCopyMatching query was %{private}@", log: Logs.search, type: .debug, String(describing: query))
+        throw HaversackError.keychainError(status)
+    }
+    
+    public func save(_ item: SecurityFrameworkQuery) throws {
+    }
+    
+    public func delete(_ item: SecurityFrameworkQuery, treatNotFoundAsSuccess: Bool) throws {
+    }
+    
+    public func generateKey(_ query: SecurityFrameworkQuery) throws -> SecKey {
+        var error: Unmanaged<CFError>?
+
+        let keyType = query[kSecAttrKeyType as String] as? String
+        os_log("Generating a key of type %{public}@", log: Logs.keyGeneration, type: .default, keyType ?? "")
+
+        guard let privateKey = SecKeyCreateRandomKey(query as CFDictionary, &error) else {
+            let theError = error!.takeRetainedValue() as Error
+            os_log("SecKeyCreateRandomKey query was %{private}@", log: Logs.keyGeneration, type: .debug, String(describing: query))
+            os_log("SecKeyCreateRandomKey returned error %{public}s", log: Logs.keyGeneration,
+                   type: .error, theError.localizedDescription)
+            throw theError
+        }
+
+        return privateKey
+    }
+    
+#if os(macOS)
+    public func exportItems(_ items: [any KeychainExportable], configuration: KeychainExportConfig) throws -> Data {
+        let secItems = try items.map { item in
+            guard let ref = item.reference else {
+                throw HaversackError.notPossible("Exporting a keychain item requires the reference to the item; try using the result of running a Haversack query with .returning(.reference).")
+            }
+
+            return ref
+        }
+
+        var data: CFData?
+        var params = configuration.keyParameters
+        let status = SecItemExport(secItems as CFArray, configuration.outputFormat, configuration.flags, &params, &data)
+
+        guard status == errSecSuccess else {
+            throw HaversackError.keychainError(status)
+        }
+
+        guard let data = data else {
+            /// The export succeeded but we didn't receive any data
+            throw HaversackError.unknownError
+        }
+
+        return data as Data
+    }
+
+    public func importItems<T>(_ items: Data, configuration: KeychainImportConfig<T>, importKeychain: SecKeychain?) throws -> [T] where T : KeychainImportable {
+        var inputFormat = configuration.inputFormat
+        var itemType = configuration.itemType
+        var keyParams = configuration.keyParams
+
+        var outItems: CFArray?
+        let status = SecItemImport(items as CFData,
+                                   configuration.fileNameOrExtension,
+                                   &inputFormat,
+                                   &itemType,
+                                   configuration.secItemImportFlags,
+                                   &keyParams,
+                                   importKeychain,
+                                   &outItems)
+
+        guard status == errSecSuccess else {
+            throw HaversackError.keychainError(status)
+        }
+
+        guard let outItems = outItems else {
+            // The import was a success but there weren't any items returned
+            return []
+        }
+
+        let cfItems = outItems as [CFTypeRef]
+        return cfItems.map { secKeychainItem in
+            T(from: secKeychainItem as? T.SecurityFrameworkType,
+              data: nil,
+              attributes: nil,
+              persistentRef: nil)
+        }
+    }
+#endif
+}
+
 /// Encapsulates the explicit code to work with the keychain through the Security framework.
 ///
 /// Subclasses can override any of the functions in order to perform tasks in their own way.
@@ -17,7 +210,9 @@ import Security
 /// All item searches are logged at the `.info` level.  Saving and deleting items are logged at
 /// the `.default` level.  All errors are logged at the `.error` level with additional query details logged at
 /// the `.debug` level and marked as private.
-open class HaversackStrategy {
+///
+/// `@unchecked` because `HaversackStrategy` is not `final`...but we designed for subclasses to inherit it.
+open class HaversackStrategy: @unchecked Sendable {
     /// Create a new strategy object
     public init() { }
 

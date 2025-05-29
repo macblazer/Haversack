@@ -10,6 +10,7 @@ import XCTest
 final class HaversackAsyncAwaitTests: XCTestCase {
     var haversack: Haversack!
     var strategy: HaversackEphemeralStrategy!
+    var implementation: EphemeralKeychain!
 
     private let sampleDomain = "example.com"
     private let sampleEntity: InternetPasswordEntity = {
@@ -22,12 +23,14 @@ final class HaversackAsyncAwaitTests: XCTestCase {
         let queue = DispatchQueue(label: "haversack.unit_testing", qos: .userInitiated,
                                   target: .global(qos: .userInitiated))
         strategy = HaversackEphemeralStrategy()
-        let config = HaversackConfiguration(queue: queue, strategy: strategy)
+        implementation = EphemeralKeychain()
+        let config = HaversackConfiguration(queue: queue, strategy: strategy, implementation: implementation)
         haversack = Haversack(configuration: config)
     }
 
     override func tearDown() {
         strategy = nil
+        implementation = nil
         haversack = nil
     }
 
@@ -44,7 +47,7 @@ final class HaversackAsyncAwaitTests: XCTestCase {
 
     func testFirstAsync() async throws {
         // Given
-        strategy.mockData["classinetm_Limitm_Lir_Datasrvrexam"] = sampleEntity
+        await implementation.setMockData(["classinetm_Limitm_Lir_Datasrvrexam": sampleEntity])
         let pwQuery = InternetPasswordQuery(server: sampleDomain)
 
         // When
@@ -67,7 +70,7 @@ final class HaversackAsyncAwaitTests: XCTestCase {
 
     func testSearchAsync() async throws {
         // Given
-        strategy.mockData["classinetm_Limitm_Lir_Refsrvrexam"] = [sampleEntity]
+        await implementation.setMockData(["classinetm_Limitm_Lir_Refsrvrexam": [sampleEntity]])
         let pwQuery = InternetPasswordQuery(server: sampleDomain)
                         .returning(.reference)
 

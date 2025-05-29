@@ -4,7 +4,7 @@
 import Foundation
 
 /// Specify the security of the keychain item
-public struct ItemSecurity {
+public struct ItemSecurity: Sendable {
 
     /// The Haversack standard security for keychain items.
     ///
@@ -12,17 +12,23 @@ public struct ItemSecurity {
     /// The item is not part of any app group or keychain group.
     public static let standard = ItemSecurity().retrievableNoThrow(when: .simple(.unlockedThisDeviceOnly))
 
-    /// The keychain query.  **Do not** manipulate this directly.
+    /// The keychain query.
     ///
-    /// You should not manipulate this directly.  Instead use the fluent methods such as ``containedIn(appGroup:)``
-    /// and ``retrievable(when:)`` to build up the query.
-    public var query: SecurityFrameworkQuery
+    /// Use the fluent methods such as ``containedIn(appGroup:)`` and ``retrievable(when:)``
+    /// to build up the query.
+    /// `nonisolated(unsafe)` because `SecurityFrameworkQuery` is not `Sendable`
+    nonisolated(unsafe) public let query: SecurityFrameworkQuery
 
     /// Construct an empty ``ItemSecurity``
     ///
     /// Use one or more of the instance methods to populate this with the desired security settings for a keychain item.
     public init() {
         query = [:]
+    }
+    
+    /// Helper initalizer for the fluent methods that return a new instance with a new query.
+    private init(query: SecurityFrameworkQuery) {
+        self.query = query
     }
 
     /// Specify an App Group that the item should be part of.  Uses `kSecAttrAccessGroup`.
@@ -42,9 +48,9 @@ public struct ItemSecurity {
             return self
         }
 
-        var copy = self
-        copy.query[kSecAttrAccessGroup as String] = appGroup
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrAccessGroup as String] = appGroup
+        return Self(query: newQuery)
     }
 
     /// Specify a Keychain Sharing group that the item should be part of.  Uses `kSecAttrAccessGroup`.
@@ -66,9 +72,9 @@ public struct ItemSecurity {
             return self
         }
 
-        var copy = self
-        copy.query[kSecAttrAccessGroup as String] = "\(teamID).\(keychainGroupName)"
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrAccessGroup as String] = "\(teamID).\(keychainGroupName)"
+        return Self(query: newQuery)
     }
 
     /// Specify when the item should be available.  Uses `kSecAttrAccessible` or `kSecAttrAccessControl`.
@@ -76,9 +82,9 @@ public struct ItemSecurity {
     /// - Throws: A ``HaversackError`` or an `NSError` from the Security framework.
     /// - Returns: An ``ItemSecurity`` struct
     public func retrievable(when availability: KeychainItemRetrievability) throws -> Self {
-        var copy = self
-        copy.query[availability.securityFrameworkKey] = try availability.securityFrameworkValue()
-        return copy
+        var newQuery = self.query
+        newQuery[availability.securityFrameworkKey] = try availability.securityFrameworkValue()
+        return Self(query: newQuery)
     }
 
 #if os(macOS)
@@ -87,9 +93,9 @@ public struct ItemSecurity {
     /// - Parameter access: A `SecAccess` reference
     /// - Returns: An ``ItemSecurity`` struct
     public func macOnly(access: SecAccess) -> Self {
-        var copy = self
-        copy.query[kSecAttrAccess as String] = access
-        return copy
+        var newQuery = self.query
+        newQuery[kSecAttrAccess as String] = access
+        return Self(query: newQuery)
     }
 
     /// Specify to use the data protection keychain available in macOS 10.15+
@@ -97,9 +103,9 @@ public struct ItemSecurity {
     /// - Returns: An ``ItemSecurity`` struct
     @available(macOS 10.15, *)
     public func macOnly(useDataProtection: Bool) -> Self {
-        var copy = self
-        copy.query[kSecUseDataProtectionKeychain as String] = useDataProtection
-        return copy
+        var newQuery = self.query
+        newQuery[kSecUseDataProtectionKeychain as String] = useDataProtection
+        return Self(query: newQuery)
     }
 #endif
 }
@@ -113,9 +119,9 @@ extension ItemSecurity {
     func retrievableNoThrow(when availability: KeychainItemRetrievability) -> Self {
         do {
             let value = try availability.securityFrameworkValue()
-            var copy = self
-            copy.query[availability.securityFrameworkKey] = value
-            return copy
+            var newQuery = self.query
+            newQuery[availability.securityFrameworkKey] = value
+            return Self(query: newQuery)
         } catch {
         }
 

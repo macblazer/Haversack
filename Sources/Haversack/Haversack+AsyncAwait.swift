@@ -7,16 +7,14 @@ import Foundation
 extension Haversack {
     /// This is equivalent to calling ``first(where:completionQueue:completion:)`` but using async-await syntax.
     public func first<T: KeychainQuerying>(where query: T) async throws -> T.Entity {
-        try await withCheckedThrowingContinuation { continuation in
-            first(where: query, completion: continuation.resume)
-        }
+        let localQuery = try makeSearchQuery(query, singleItem: true)
+        return try await self.configuration.implementation.searchForOne(localQuery)
     }
 
     /// This is equivalent to calling ``search(where:completionQueue:completion:)`` but using async-await syntax.
     public func search<T: KeychainQuerying>(where query: T) async throws -> [T.Entity] {
-        try await withCheckedThrowingContinuation { continuation in
-            search(where: query, completion: continuation.resume)
-        }
+        let localQuery = try makeSearchQuery(query, singleItem: false)
+        return try await self.configuration.implementation.search(localQuery)
     }
 
     /// This is equivalent to calling ``save(_:itemSecurity:updateExisting:completionQueue:completion:)`` but using async-await syntax.
@@ -29,9 +27,13 @@ extension Haversack {
 
     /// This is equivalent to calling ``generateKey(fromConfig:itemSecurity:completionQueue:completion:)`` but using async-await syntax.
     public func generateKey(fromConfig config: KeyGenerationConfig, itemSecurity: ItemSecurity) async throws -> SecKey {
-        try await withCheckedThrowingContinuation { continuation in
-            generateKey(fromConfig: config, itemSecurity: itemSecurity, completion: continuation.resume)
-        }
+        let query = try makeKeyGenerationQuery(fromConfig: config, itemSecurity: itemSecurity)
+
+        return try self.configuration.strategy.generateKey(query)
+
+//        try await withCheckedThrowingContinuation { continuation in
+//            generateKey(fromConfig: config, itemSecurity: itemSecurity, completion: continuation.resume)
+//        }
     }
 
     /// This is equivalent to calling ``delete(where:treatNotFoundAsSuccess:completionQueue:completion:)`` but using async-await syntax.

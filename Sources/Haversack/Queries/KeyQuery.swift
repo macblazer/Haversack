@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2023, Jamf
 
-import Foundation
+@preconcurrency import Foundation
 
 /// Fluent interface for searching the keychain for cryptographic keys.
 ///
@@ -109,7 +109,7 @@ public struct KeyQuery: KeyBaseQuerying {
 }
 
 /// Encapsulates the cryptographic key's class (public, private, or symmetric).
-public enum KeyClass {
+public enum KeyClass: Sendable {
     /// Represents a private key
     case `private`
     /// Represents a public key

@@ -12,7 +12,7 @@ import Foundation
 ///
 /// Note that if a different queue is specified, all instances of ``Haversack/Haversack`` should be initialized with
 /// the same queue so that all keychain access is done atomically.
-public struct HaversackConfiguration {
+public struct HaversackConfiguration: Sendable {
     /// The `DispatchQueue` to use in order to serialize all keychain access
     ///
     /// If not otherwise specified, a default serial queue will be created with the label "com.jamf.haversack".
@@ -20,17 +20,22 @@ public struct HaversackConfiguration {
 
     /// The strategy to use for making keychain calls.
     public let strategy: HaversackStrategy
+    
+    /// The implementation to use for making keychain calls.
+    public let implementation: KeychainImplementation
 
 #if os(macOS)
     /// The keychain file to use.  Default is to use the user's login keychain.
     ///
     /// macOS only.
-    public let keychain: KeychainFile?
+    /// `nonisolated(unsafe)` because `KeychainFile` is not Sendable
+    nonisolated(unsafe) public let keychain: KeychainFile?
 #endif
 
 #if os(macOS)
 
     public init(queue: DispatchQueue? = nil, strategy: HaversackStrategy? = nil,
+                implementation: KeychainImplementation? = nil,
                 keychain: KeychainFile? = nil) {
         if let givenQueue = queue {
             serialQueue = givenQueue
@@ -44,6 +49,12 @@ public struct HaversackConfiguration {
             self.strategy = givenStrategy
         } else {
             self.strategy = HaversackStrategy()
+        }
+
+        if let givenImplementation = implementation {
+            self.implementation = givenImplementation
+        } else {
+            self.implementation = OperatingSystemKeychain()
         }
 
         self.keychain = keychain

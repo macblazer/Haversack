@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Copyright 2023, Jamf
 
-import Foundation
+@preconcurrency import Foundation
 
 /// Represents a password to an account on another computer or website in the keychain.
 ///
@@ -17,7 +17,7 @@ public class InternetPasswordEntity: PasswordBaseEntity {
 
     /// A communications protocol for internet passwords.
     /// - Note: Mirrors the `kSecAttrProtocol...` constants.
-    public enum NetworkProtocol {
+    public enum NetworkProtocol: Sendable {
         case FTP
         case FTPAccount
         case HTTP
@@ -99,7 +99,7 @@ public class InternetPasswordEntity: PasswordBaseEntity {
 
     /// An authentication scheme for internet passwords.
     /// - Note: Mirrors the `kSecAttrAuthenticationType...` constants.
-    public enum AuthenticationType {
+    public enum AuthenticationType: Sendable {
         case NTLM
         case MSN
         case DPA

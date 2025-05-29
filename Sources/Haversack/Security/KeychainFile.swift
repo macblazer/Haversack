@@ -28,13 +28,17 @@ public class KeychainFile {
     static let rootCertificatesKeychainPath = "/System/Library/Keychains/SystemRootCertificates.keychain"
 
     /// An instance of ``KeychainFile`` that points at the system root certificates keychain
-    public static let systemRootCertificates = KeychainFile(at: rootCertificatesKeychainPath)
+    ///
+    /// `nonisolated(unsafe)` because multiple threads could attempt to change the `reference` property
+    nonisolated(unsafe) public static let systemRootCertificates = KeychainFile(at: rootCertificatesKeychainPath)
 
     /// The path to the system keychain.
     static let systemKeychainPath = system.path
 
     /// An instance of ``KeychainFile`` that points at the system keychain
-    public static let system: KeychainFile = {
+    ///
+    /// `nonisolated(unsafe)` because multiple threads could attempt to change the `reference` property
+    nonisolated(unsafe) public static let system: KeychainFile = {
         let legacySystemKeychainPath = "/Library/Keychains/System.keychain"
         var searchList: CFArray?
         let status = withUnsafeMutablePointer(to: &searchList) {

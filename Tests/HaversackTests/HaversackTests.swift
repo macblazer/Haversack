@@ -9,6 +9,7 @@ import XCTest
 final class HaversackTests: XCTestCase {
     var haversack: Haversack!
     var strategy: HaversackEphemeralStrategy!
+    var implementation: EphemeralKeychain!
 
     private let sampleDomain = "example.com"
     private let sampleEntity: InternetPasswordEntity = {
@@ -27,12 +28,14 @@ final class HaversackTests: XCTestCase {
         let queue = DispatchQueue(label: "haversack.unit_testing", qos: .userInitiated,
                                   target: .global(qos: .userInitiated))
         strategy = HaversackEphemeralStrategy()
-        let config = HaversackConfiguration(queue: queue, strategy: strategy)
+        implementation = EphemeralKeychain()
+        let config = HaversackConfiguration(queue: queue, strategy: strategy, implementation: implementation)
         haversack = Haversack(configuration: config)
     }
 
     override func tearDown() {
         strategy = nil
+        implementation = nil
         haversack = nil
     }
 
@@ -88,9 +91,10 @@ final class HaversackTests: XCTestCase {
         wait(for: [queryFinished], timeout: 1)
     }
 
-    func testFirstAsync() throws {
+    func testFirstAsync() async throws {
         // given
-        strategy.mockData["classinetm_Limitm_Lir_Datasrvrexam"] = sampleEntity
+        await implementation.setMockData(["classinetm_Limitm_Lir_Datasrvrexam": sampleEntity])
+//        strategy.mockData["classinetm_Limitm_Lir_Datasrvrexam"] = sampleEntity
         let pwQuery = InternetPasswordQuery(server: sampleDomain)
         let queryFinished = expectation(description: "search finished")
 
@@ -104,7 +108,7 @@ final class HaversackTests: XCTestCase {
             }
             queryFinished.fulfill()
         }
-        wait(for: [queryFinished], timeout: 1)
+        await fulfillment(of: [queryFinished], timeout: 1)
     }
 
     func testSearchNoData() throws {
